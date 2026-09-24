@@ -1,0 +1,196 @@
+<!-- MaxIQ currency grid. Paste into one Webflow Embed element placed inside the logo section. -->
+<div class="mxq-dollars" data-clear="#grid" data-density="1" data-speed="1" data-size="8" data-hover="1" data-symbols="$$&euro;&pound;"></div>
+<style>
+.mxq-dollars{position:absolute;inset:0;z-index:-1;overflow:hidden;pointer-events:none}
+.mxq-dollars canvas{position:absolute;left:0;top:0;width:100%;height:100%;display:block}
+</style>
+<script>
+(function () {
+ // Colors: background, "/" hatch, "·" dust, dollar sign, euro and pound signs
+ var BG = '#fdfdfc', HATCH = '#eeefee', DUST = '#d8dcda', DOLLAR = '#b1b7b4', OTHER = '#cbd0cd';
+ var FONT = 'ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace';
+ var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+ function rnd(n) { return (Math.random() * n) | 0; }
+ function chance(p) { return Math.random() < p; }
+ function tile(w, h, bg, chr, color, font) {
+  var c = document.createElement('canvas'), x = c.getContext('2d');
+  c.width = w; c.height = h;
+  x.fillStyle = bg; x.fillRect(0, 0, w, h);
+  x.fillStyle = color; x.font = font; x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillText(chr, w / 2, h / 2 + h * 0.04);
+  return c;
+ }
+
+ function init(el) {
+  if (el._mxq) return;
+  var d = el.dataset;
+  var dens = +d.density || 1, speed = +d.speed || 1, size = +d.size || 8, hover = d.hover !== '0';
+  var bg = d.bg || BG, clear = d.clear || 'auto';
+  var chars = (d.symbols || '$$\u20AC\u00A3').split(''), nc = chars.length;
+  var host = el.parentElement;
+  if (host && host.classList.contains('w-embed')) host = host.parentElement;
+  if (host) {
+   if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
+   host.style.isolation = 'isolate';
+  if (host === document.body) el.style.cssText = 'position:relative;height:220px';
+  }
+  var cv = document.createElement('canvas'), ctx = cv.getContext('2d');
+  el.appendChild(cv);
+
+  var W, H, dpr, k, cw, ch, cols, rows, N = 0, colsL, colsR, gapC, leftX, rightX, yOff, asp, vis;
+  var sym, ttl, dust, shown, glyph, ripples = [];
+  var t = 0, last = 0, on = false, raf, pw = 0, ph = 0, lastHover = 0, tick = 50 / speed;
+
+  function cellX(c) {
+   return c < colsL ? leftX + c * cw : c < colsL + gapC ? -1e9 : rightX + (c - colsL - gapC) * cw;
+  }
+  function clearSpan(b) {
+  if (clear === 'none' || clear === '0') return null;
+  if (/^\d+$/.test(clear)) return [(pw - clear) / 2, (pw + +clear) / 2];
+  var node = (clear !== 'auto' && document.querySelector(clear)) || host;
+  for (var depth = 0; node && depth < 8; depth++) {
+   var kids = [], one = null;
+   for (var j = 0; j < node.children.length; j++) {
+    var c = node.children[j], q = c.getBoundingClientRect();
+    if (!c.contains(el) && q.width * q.height >= 1 && (c.children.length || c.textContent.trim() || /^(img|svg|picture|video)$/i.test(c.tagName))) { kids.push(q); one = c; }
+   }
+   if (kids.length === 1) { node = one; continue; }
+   if (!kids.length) kids.push(node.getBoundingClientRect());
+   var L = 1e9, R = -1e9;
+   kids.forEach(function (q) { L = Math.min(L, q.left); R = Math.max(R, q.right); });
+   return R - L < b.width * 0.97 ? [(L - b.left) * k, (R - b.left) * k] : null;
+  }
+  return null;
+ }
+
+  function ripple(x, y, s, type) {
+   var fill = type > 0;
+   ripples.push({ x: x, y: y, s: s, type: type, g: 0, v: fill ? 0.08 + Math.random() * 0.05 : 0.07 + Math.random() * 0.06,
+    R: fill ? 5 + Math.random() * 6 : 5 + Math.random() * 13,
+    a: Math.random() * 7, b: Math.random() * 7, c: Math.random() * 7, n: 2 + rnd(3) });
+  }
+  function rippleStep() {
+   var target = Math.max(1, vis / 200 * dens);
+   while (ripples.length < target) {
+    var u = Math.random(), c = rnd(colsL + colsR);
+    ripple(c < colsL ? c : c + gapC, rnd(rows + 2) - 1, rnd(nc), u < 0.03 ? 1 : 0);
+   }
+   for (var q = ripples.length - 1; q >= 0; q--) {
+    var f = ripples[q], g = ++f.g, fill = f.type > 0, T = f.R / f.v, r;
+    r = fill ? f.R * Math.min(1, g / T, (2 * T - g) / (0.6 * T)) : g * f.v;
+    if (r <= 0 || (!fill && r > f.R)) { ripples.splice(q, 1); continue; }
+    var fade = fill ? 1 : 1 - r / f.R, ry = r * 1.15 + 1, rx = ry / asp;
+    var x0 = Math.max(0, Math.floor(f.x - rx)), x1 = Math.min(cols - 1, Math.ceil(f.x + rx));
+    var y0 = Math.max(0, Math.floor(f.y - ry)), y1 = Math.min(rows - 1, Math.ceil(f.y + ry));
+    for (var y = y0; y <= y1; y++) for (var x = x0; x <= x1; x++) {
+     var dx = x - f.x, dy = y - f.y, X = Math.abs(dx) * asp, Y = Math.abs(dy);
+     var dd = Math.max(X, Y, (X + Y) * 0.6);
+     if (dd > ry || (!fill && dd < r * 0.85 - 1.2)) continue;
+     var th = Math.atan2(dy, dx * asp);
+     var rr = r * (1 + 0.14 * Math.sin(f.n * th + f.a + g * 0.02) + 0.07 * Math.sin((f.n + 2) * th + f.b - g * 0.03));
+     if (dd >= rr) continue;
+     var i = y * cols + x;
+     if (fill) {
+      if (chance(0.1)) continue;
+      if (f.type === 1) dust[i] = Math.max(dust[i], 2 + rnd(3));
+      else { ttl[i] = Math.max(ttl[i], 2 + rnd(3)); sym[i] = f.s; }
+     } else if (dd >= rr - 1 && Math.sin((f.n + 3) * th + f.c) + Math.sin(7 * th + f.b) > 2.8 * fade - 1.8) {
+      ttl[i] = Math.max(ttl[i], chance(0.02) ? 12 + rnd(25) : 2 + rnd(3)); sym[i] = f.s;
+     }
+    }
+   }
+  }
+
+  function step() {
+   t++;
+   rippleStep();
+   for (var i = 0; i < N; i++) { if (ttl[i]) ttl[i]--; if (dust[i]) dust[i]--; }
+  }
+
+  function paint(full) {
+   if (full) { ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H); shown.fill(255); }
+   for (var i = 0; i < N; i++) {
+    var g = ttl[i] ? 2 + sym[i] : dust[i] ? 1 : 0;
+    if (g === shown[i]) continue;
+    var x = cellX(i % cols);
+    if (x < -cw) continue;
+    shown[i] = g;
+    ctx.drawImage(glyph[g], x, yOff + ((i / cols) | 0) * ch);
+   }
+  }
+
+  function build() {
+   var w = el.clientWidth, h = el.clientHeight;
+   if (!w || !h || (w === pw && h === ph)) return;
+   pw = w; ph = h;
+   dpr = Math.min(window.devicePixelRatio || 1, 2);
+   var b = el.getBoundingClientRect();
+   k = w / (b.width || w);
+   W = cv.width = Math.round(w * dpr); H = cv.height = Math.round(h * dpr);
+   cw = Math.round(size * 0.92 * dpr); ch = Math.round(size * 1.1 * dpr); asp = cw / ch;
+   var span = clearSpan(b), l = W / 2, r = W / 2;
+   if (span && span[1] > span[0]) { l = Math.max(0, span[0] * dpr); r = Math.min(W, span[1] * dpr); }
+   colsL = Math.ceil(l / cw); leftX = l - colsL * cw; rightX = r;
+   gapC = r > l ? Math.max(1, Math.round((r - l) / cw)) : 0;
+   colsR = Math.ceil((W - r) / cw); cols = colsL + gapC + colsR;
+   rows = Math.max(1, Math.floor(H / ch)); yOff = Math.floor((H - rows * ch) / 2);
+   vis = (colsL + colsR) * rows;
+   N = vis ? cols * rows : 0;
+   sym = new Uint8Array(N); ttl = new Uint8Array(N); dust = new Uint8Array(N); shown = new Uint8Array(N);
+   ripples = [];
+   var font = Math.round(size * dpr) + 'px ' + FONT;
+   glyph = [tile(cw, ch, bg, '/', HATCH, font), tile(cw, ch, bg, '\u00B7', DUST, font)].concat(chars.map(function (c) {
+    return tile(cw, ch, bg, c, c === '$' ? DOLLAR : OTHER, font);
+   }));
+   ctx.clearRect(0, 0, W, H);
+   if (!N) return;
+   for (var i = 0; i < 150; i++) step();
+   paint(true);
+   ctx.clearRect(l, 0, r - l, H);
+  }
+
+  function frame(now) {
+   if (!on || !el.isConnected) return stop();
+   raf = requestAnimationFrame(frame);
+   if (!N || now - last < tick - 4) return;
+   last = now; step(); paint(false);
+  }
+  function start() { if (!on && !reduce) { on = true; raf = requestAnimationFrame(frame); } }
+  function stop() { on = false; cancelAnimationFrame(raf); }
+
+  build();
+  if ('IntersectionObserver' in window) {
+   new IntersectionObserver(function (e) { e[0].isIntersecting ? start() : stop(); }).observe(el);
+  } else start();
+  if ('ResizeObserver' in window) {
+   var rt;
+   new ResizeObserver(function () { clearTimeout(rt); rt = setTimeout(build, 150); }).observe(el);
+  }
+  if (hover && !reduce && host) {
+   host.addEventListener('pointermove', function (e) {
+    if (e.pointerType !== 'mouse' || !N || t === lastHover) return;
+    var b = el.getBoundingClientRect(), hr = Math.max(2, Math.round(30 / size));
+   k = el.clientWidth / (b.width || 1);
+    var px = (e.clientX - b.left) * k * dpr, cy = Math.floor(((e.clientY - b.top) * k * dpr - yOff) / ch), cx;
+    if (px < leftX + colsL * cw) cx = Math.floor((px - leftX) / cw);
+    else if (px >= rightX) cx = colsL + gapC + Math.floor((px - rightX) / cw);
+    else return;
+    lastHover = t;
+    for (var y = cy - hr; y <= cy + hr; y++) for (var x = cx - 2 * hr; x <= cx + 2 * hr; x++) {
+     if (x < 0 || y < 0 || x >= cols || y >= rows) continue;
+     var dx = (x - cx) * asp, dy = y - cy, r2 = (dx * dx + dy * dy) / (hr * hr), i = y * cols + x;
+     if (r2 < 0.3) ttl[i] = 0;
+     if (r2 < 1 + Math.random() * 0.4) dust[i] = Math.max(dust[i], 40 + rnd(50));
+    }
+    if (chance(0.03)) ripple(cx, cy, Math.max(0, chars.indexOf('$')), 0);
+   });
+  }
+ }
+
+ function boot() { document.querySelectorAll('.mxq-dollars').forEach(init); }
+ window.mxqDollars = boot;
+ if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+ else boot();
+})();
+</script>
