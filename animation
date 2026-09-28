@@ -1,13 +1,14 @@
-<!-- MaxIQ currency grid. Paste into one Webflow Embed element placed inside the logo section. -->
-<div class="mxq-dollars" data-clear="#grid" data-density="1" data-speed="1" data-size="8" data-hover="1" data-symbols="$$&euro;&pound;"></div>
+<!-- MaxIQ currency grid (dark). Paste into one Webflow Embed element placed inside the logo section. -->
+<!-- Set data-bg to the exact background color of your section so the edges blend in. -->
+<div class="mxq-dollars" data-bg="#000000" data-hatch="#1a1c1b" data-dust="#343937" data-dollar="#a3aba7" data-other="#6c7470" data-words="Pipeline,Forecast,ARR,Deals,Sales,Win rate" data-word-rate="2.3" data-word-time="3" data-word-color="#29db70" data-clear="none" data-density="1.4" data-speed="1" data-size="8" data-hover="1" data-symbols="$"></div>
 <style>
-.mxq-dollars{position:absolute;inset:0;z-index:-1;overflow:hidden;pointer-events:none}
+.mxq-dollars{position:absolute;inset:0;z-index:-1;overflow:hidden;pointer-events:none;background:#000}
 .mxq-dollars canvas{position:absolute;left:0;top:0;width:100%;height:100%;display:block}
 </style>
 <script>
 (function () {
- // Colors: background, "/" hatch, "·" dust, dollar sign, euro and pound signs
- var BG = '#fdfdfc', HATCH = '#eeefee', DUST = '#d8dcda', DOLLAR = '#b1b7b4', OTHER = '#cbd0cd';
+ // Dark colors: background, "/" hatch, "·" dust, dollar sign, euro and pound signs
+ var BG = '#000000', HATCH = '#1a1c1b', DUST = '#343937', DOLLAR = '#a3aba7', OTHER = '#6c7470', WORD = '#29db70';
  var FONT = 'ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace';
  var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -27,19 +28,28 @@
   var d = el.dataset;
   var dens = +d.density || 1, speed = +d.speed || 1, size = +d.size || 8, hover = d.hover !== '0';
   var bg = d.bg || BG, clear = d.clear || 'auto';
-  var chars = (d.symbols || '$$\u20AC\u00A3').split(''), nc = chars.length;
+  var cHatch = d.hatch || HATCH, cDust = d.dust || DUST, cDollar = d.dollar || DOLLAR, cOther = d.other || OTHER;
+  // Words: comma-separated list, how often they appear, how long they stay (seconds), and their color
+  var words = (d.words || '').split(',').map(function (w) { return w.trim(); }).filter(Boolean);
+  var wRate = d.wordRate != null && d.wordRate !== '' ? +d.wordRate : 1;
+  var wLife = Math.max(10, Math.round((+d.wordTime || 3) * 20)), cWord = d.wordColor || WORD;
+  el.style.background = bg;
+  var chars = Array.from(d.symbols || '$$\u20AC\u00A3'), nc = chars.length;
+  var wchars = [], wmap = {};
+  words.forEach(function (w) { Array.from(w).forEach(function (c) { if (!(c in wmap) && nc + wchars.length < 250) { wmap[c] = nc + wchars.length; wchars.push(c); } }); });
+  var wordIdx = words.map(function (w) { return Array.from(w).map(function (c) { return wmap[c] || 0; }); });
   var host = el.parentElement;
   if (host && host.classList.contains('w-embed')) host = host.parentElement;
   if (host) {
    if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
    host.style.isolation = 'isolate';
-  if (host === document.body) el.style.cssText = 'position:relative;height:220px';
+  if (host === document.body) el.style.cssText = 'position:relative;height:220px;background:' + bg;
   }
   var cv = document.createElement('canvas'), ctx = cv.getContext('2d');
   el.appendChild(cv);
 
   var W, H, dpr, k, cw, ch, cols, rows, N = 0, colsL, colsR, gapC, leftX, rightX, yOff, asp, vis;
-  var sym, ttl, dust, shown, glyph, ripples = [];
+  var sym, ttl, dust, shown, glyph, ripples = [], wsym, wttl, live = [];
   var t = 0, last = 0, on = false, raf, pw = 0, ph = 0, lastHover = 0, tick = 50 / speed;
 
   function cellX(c) {
@@ -102,16 +112,41 @@
    }
   }
 
+  function spawnWord() {
+   var s = wordIdx[rnd(wordIdx.length)], len = s.length, zones = [];
+   if (colsL >= len + 2) zones.push([0, colsL]);
+   if (colsR >= len + 2) zones.push([colsL + gapC, colsR]);
+   if (!zones.length) return;
+   for (var tries = 0; tries < 6; tries++) {
+    var z = zones.length > 1 && chance(colsR / (colsL + colsR)) ? zones[1] : zones[0];
+    var x = z[0] + 1 + rnd(z[1] - len - 1), y = rnd(rows), ok = true;
+    for (var q = 0; q < live.length; q++) {
+     var w = live[q];
+     if (Math.abs(w.y - y) <= 1 && x <= w.x + w.len && w.x <= x + len) { ok = false; break; }
+    }
+    if (ok) { live.push({ x: x, y: y, len: len, s: s, age: 0 }); return; }
+   }
+  }
+  function wordStep() {
+   if (wordIdx.length && wRate > 0 && chance(Math.min(0.5, wRate * vis / 120000))) spawnWord();
+   for (var q = live.length - 1; q >= 0; q--) {
+    var w = live[q], a = ++w.age, i0 = w.y * cols + w.x;
+    for (var j = 0; j < w.len; j++) if (a > j && a < wLife + j) { wttl[i0 + j] = 2; wsym[i0 + j] = w.s[j]; }
+    if (a >= wLife + w.len) live.splice(q, 1);
+   }
+  }
+
   function step() {
    t++;
    rippleStep();
-   for (var i = 0; i < N; i++) { if (ttl[i]) ttl[i]--; if (dust[i]) dust[i]--; }
+   wordStep();
+   for (var i = 0; i < N; i++) { if (ttl[i]) ttl[i]--; if (dust[i]) dust[i]--; if (wttl[i]) wttl[i]--; }
   }
 
   function paint(full) {
    if (full) { ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H); shown.fill(255); }
    for (var i = 0; i < N; i++) {
-    var g = ttl[i] ? 2 + sym[i] : dust[i] ? 1 : 0;
+    var g = wttl[i] ? 2 + wsym[i] : ttl[i] ? 2 + sym[i] : dust[i] ? 1 : 0;
     if (g === shown[i]) continue;
     var x = cellX(i % cols);
     if (x < -cw) continue;
@@ -138,11 +173,12 @@
    vis = (colsL + colsR) * rows;
    N = vis ? cols * rows : 0;
    sym = new Uint8Array(N); ttl = new Uint8Array(N); dust = new Uint8Array(N); shown = new Uint8Array(N);
+   wsym = new Uint8Array(N); wttl = new Uint8Array(N); live = [];
    ripples = [];
    var font = Math.round(size * dpr) + 'px ' + FONT;
-   glyph = [tile(cw, ch, bg, '/', HATCH, font), tile(cw, ch, bg, '\u00B7', DUST, font)].concat(chars.map(function (c) {
-    return tile(cw, ch, bg, c, c === '$' ? DOLLAR : OTHER, font);
-   }));
+   glyph = [tile(cw, ch, bg, '/', cHatch, font), tile(cw, ch, bg, '\u00B7', cDust, font)].concat(chars.map(function (c) {
+    return tile(cw, ch, bg, c, c === '$' ? cDollar : cOther, font);
+   })).concat(wchars.map(function (c) { return tile(cw, ch, bg, c, cWord, font); }));
    ctx.clearRect(0, 0, W, H);
    if (!N) return;
    for (var i = 0; i < 150; i++) step();
@@ -183,6 +219,9 @@
      if (r2 < 0.3) ttl[i] = 0;
      if (r2 < 1 + Math.random() * 0.4) dust[i] = Math.max(dust[i], 40 + rnd(50));
     }
+    live.forEach(function (w) {
+     if (w.age < wLife && Math.abs(w.y - cy) <= hr && w.x <= cx + 2 * hr && cx - 2 * hr <= w.x + w.len) w.age = wLife;
+    });
     if (chance(0.03)) ripple(cx, cy, Math.max(0, chars.indexOf('$')), 0);
    });
   }
